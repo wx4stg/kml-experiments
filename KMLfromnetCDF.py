@@ -23,12 +23,17 @@ if __name__ == "__main__":
     colormap = "viridis" # matplotlib colormap (see https://matplotlib.org/stable/tutorials/colors/colormaps.html for options)
     title = "Janurary 850 hPa height climatology" # Title
     alpha = 0.5 # transparency of polygons in kml, between 0 and 1
+    minLat = 1 # minimum latitude to plot
+    maxLat = 90 # maximum latitude to plot
+    minLon = 230 # minimum longitude to plot
+    maxLon = 300 # maximum longitude to plot
 
     ## THE ACTUAL CODE (this shouldn't need to be edited under normal circumstances)
     outputFileName = inputFile.replace(".nc", "")
     dataset = xr.open_dataset(inputFile)
     dataset = dataset.isel(time=0)
     dataset = dataset.sel(level=850.0)
+    # dataset = dataset.sel(lat=slice(maxLat, minLat), lon=slice(minLon, maxLon))
     print("\n\n")
     print("DATASET VARIABLES: "+str(list(dataset.variables)))
     print("DATASET MIN: "+str(np.min(dataset.hgt.data)))
@@ -71,7 +76,8 @@ if __name__ == "__main__":
     plt.close(linesFig)
     filledFig = plt.figure()
     filledAx = plt.axes(projection=ccrs.PlateCarree())
-    filledAx.contour(lonData, dataset.lat, hgtData, levels=levels, zorder=2, transform=ccrs.PlateCarree(), colors="k", linewidths=0.5)
+    cc = filledAx.contour(lonData, dataset.lat, hgtData, levels=levels, zorder=2, transform=ccrs.PlateCarree(), colors="k", linewidths=0.5)
+    filledAx.clabel(cc, cc.levels, inline=True, fontsize=5)
     polys = filledAx.contourf(lonData, dataset.lat, hgtData, levels=levels, zorder=1, transform=ccrs.PlateCarree(), cmap=colormap)
     filledAx.add_feature(cfeat.COASTLINE.with_scale("50m"))
     filledAx.set_axis_off()
@@ -82,6 +88,7 @@ if __name__ == "__main__":
     polyAx = plt.axes(projection=ccrs.PlateCarree())
     polyAx.contour(lonData, dataset.lat, hgtData, levels=levels, zorder=2, transform=ccrs.PlateCarree(), colors="k", linewidths=0.5)
     j = 0
+    parentPoly = None
     for polyCollection in polys.collections:
         level = levels[j]
         paths = polyCollection.get_paths()
@@ -106,30 +113,19 @@ if __name__ == "__main__":
                 innerPath = edgesOfPoly[0]
                 polyAx.plot(innerPath[:,0], innerPath[:,1], transform=ccrs.PlateCarree(), color="lime", linewidth=0.5)
             elif len(edgesOfPoly) >= 2:
-                for k in range(len(edgesOfPoly)):
-                    parentPath = mpath(edgesOfPoly[k])
-                    childPaths = copy.deepcopy(edgesOfPoly)
-                    childPaths.pop(k)
-                    isValid = True
-                    childPathsList = None
-                    for childPath in childPaths:
-                        if childPathsList == None:
-                            childPathsList = [childPath]
-                        else:
-                            childPathsList = childPathsList + [childPath]
-                        if not np.all(parentPath.contains_points(childPath)):
-                            isValid = False
-                        if isValid:
-                            break
-                    kmlPoly = polyKml.newpolygon(name="PARENT: Between "+str(level)+" m and "+str(levels[j+1]), outerboundaryis=list(map(tuple, parentPath.vertices)), innerboundaryis=childPathsList)
-                    rgb = np.array(colormap(norm(level))[0:-1]) * 255
-                    rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
-                    rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
-                    rgb = "".join(reversed(rgb))
-                    kmlPoly.style.polystyle.color = rgb
-                    polyAx.plot(parentPath.vertices[:,0], parentPath.vertices[:,1], transform=ccrs.PlateCarree(), color="red", linewidth=0.5)
-                    for childPath in childPaths:
-                        polyAx.plot(childPath[:,0], childPath[:,1], transform=ccrs.PlateCarree(), color="cyan", linewidth=0.5)
+                parentPath = edgesOfPoly[0]
+                childPaths = edgesOfPoly[1:]
+                parentPathTupleList = list(map(tuple, parentPath))
+                childPathTupleList = [list(map(tuple, childPath)) for childPath in childPaths]
+                parentPoly = polyKml.newpolygon(name=": Between "+str(level)+" m and "+str(levels[j+1])+" m", outerboundaryis=parentPathTupleList, innerboundaryis=childPathTupleList)
+                rgb = np.array(colormap(norm(level))[0:-1]) * 255
+                rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
+                rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
+                rgb = "".join(reversed(rgb))
+                parentPoly.style.polystyle.color = rgb
+                polyAx.plot(parentPath[:,0], parentPath[:,1], transform=ccrs.PlateCarree(), color="red", linewidth=0.5)
+                for childPath in childPaths:
+                    polyAx.plot(childPath[:,0], childPath[:,1], transform=ccrs.PlateCarree(), color="cyan", linewidth=0.5)
         j += 1
     polyAx.add_feature(cfeat.COASTLINE.with_scale("50m"))
     polyAx.set_extent([-180, 180, -90, 90])
