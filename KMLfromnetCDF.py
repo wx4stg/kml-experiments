@@ -2,8 +2,6 @@
 # Contouring netCDF data to KML
 # Created 9 August 2022 by Sam Gardner <stgardner4@tamu.edu>
 
-from errno import EDEADLK
-from ntpath import join
 import xarray as xr
 import numpy as np
 from matplotlib import pyplot as plt
@@ -14,7 +12,60 @@ from cartopy import crs as ccrs
 from cartopy import feature as cfeat
 from cartopy.util import add_cyclic_point
 import simplekml
-import copy
+
+def create_kml_from_contourfs(polys, cmap, norm, levels, alpha, units, showBorders, filename):
+    debugFig = plt.figure()
+    debugAx = debugFig.gca()
+    polyKml = simplekml.Kml()
+    j = 0
+    parentPoly = None
+    for polyCollection in polys.collections:
+        level = levels[j]
+        paths = polyCollection.get_paths()
+        for path in paths:
+            vertices = path.vertices
+            codes = path.codes
+            startIndices = np.where(codes == 1)[0]
+            endIndices = np.where(codes == 79)[0]
+            edgesOfPoly = list()
+            for i in range(len(startIndices)):
+                startIdx = startIndices[i]
+                endIdx = endIndices[i]
+                pathPoints = vertices[startIdx:endIdx+1]
+                edgesOfPoly.append(pathPoints)
+            if len(edgesOfPoly) == 1:
+                kmlPoly = polyKml.newpolygon(name=f"Between {str(level)} {units} and {str(levels[j+1])} {units}", outerboundaryis=edgesOfPoly[0])
+                rgb = np.array(cmap(norm(level))[0:-1]) * 255
+                rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
+                rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
+                rgb = [rgbvalue.zfill(2) for rgbvalue in rgb]
+                rgb = "".join(reversed(rgb))
+                kmlPoly.style.polystyle.color = rgb
+                if showBorders:
+                    kmlPoly.style.linestyle.width = 1
+                else:
+                    kmlPoly.style.linestyle.width = 0
+            elif len(edgesOfPoly) >= 2:
+                parentPath = edgesOfPoly[0]
+                childPaths = edgesOfPoly[1:]
+                parentPathTupleList = list(map(tuple, parentPath))
+                childPathTupleList = [list(map(tuple, childPath)) for childPath in childPaths]
+                parentPoly = polyKml.newpolygon(name=f"Between {str(level)} {units} and {str(levels[j+1])} {units}", outerboundaryis=parentPathTupleList, innerboundaryis=childPathTupleList)
+                rgb = np.array(cmap(norm(level))[0:-1]) * 255
+                rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
+                rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
+                rgb = [rgbvalue.zfill(2) for rgbvalue in rgb]
+                rgb = "".join(reversed(rgb))
+                parentPoly.style.polystyle.color = rgb
+                if showBorders:
+                    kmlPoly.style.linestyle.width = 1
+                else:
+                    kmlPoly.style.linestyle.width = 0
+                    kmlPoly.style.linestyle.color = "00000000"
+        j += 1
+    print("WRITING DATA...")
+    with open(filename+".kml", "w") as f:
+        f.write(polyKml.kml())
 
 if __name__ == "__main__":
     ## PARAMETERS (edit these)
@@ -27,6 +78,7 @@ if __name__ == "__main__":
     maxLat = 90 # maximum latitude to plot
     minLon = 230 # minimum longitude to plot
     maxLon = 300 # maximum longitude to plot
+    units = "m" # units of data
 
     ## THE ACTUAL CODE (this shouldn't need to be edited under normal circumstances)
     outputFileName = inputFile.replace(".nc", "")
@@ -83,54 +135,4 @@ if __name__ == "__main__":
     filledAx.set_axis_off()
     filledFig.set_size_inches(1920*px, 1080*px)
     filledFig.savefig("FILLED_"+outputFileName+".png")
-    polyKml = simplekml.Kml()
-    polyFig = plt.figure()
-    polyAx = plt.axes(projection=ccrs.PlateCarree())
-    polyAx.contour(lonData, dataset.lat, hgtData, levels=levels, zorder=2, transform=ccrs.PlateCarree(), colors="k", linewidths=0.5)
-    j = 0
-    parentPoly = None
-    for polyCollection in polys.collections:
-        level = levels[j]
-        paths = polyCollection.get_paths()
-        for path in paths:
-            vertices = path.vertices
-            codes = path.codes
-            startIndices = np.where(codes == 1)[0]
-            endIndices = np.where(codes == 79)[0]
-            edgesOfPoly = list()
-            for i in range(len(startIndices)):
-                startIdx = startIndices[i]
-                endIdx = endIndices[i]
-                pathPoints = vertices[startIdx:endIdx+1]
-                edgesOfPoly.append(pathPoints)
-            if len(edgesOfPoly) == 1:
-                kmlPoly = polyKml.newpolygon(name="Between "+str(level)+" m and "+str(levels[j+1]), outerboundaryis=edgesOfPoly[0])
-                rgb = np.array(colormap(norm(level))[0:-1]) * 255
-                rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
-                rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
-                rgb = "".join(reversed(rgb))
-                kmlPoly.style.polystyle.color = rgb
-                innerPath = edgesOfPoly[0]
-                polyAx.plot(innerPath[:,0], innerPath[:,1], transform=ccrs.PlateCarree(), color="lime", linewidth=0.5)
-            elif len(edgesOfPoly) >= 2:
-                parentPath = edgesOfPoly[0]
-                childPaths = edgesOfPoly[1:]
-                parentPathTupleList = list(map(tuple, parentPath))
-                childPathTupleList = [list(map(tuple, childPath)) for childPath in childPaths]
-                parentPoly = polyKml.newpolygon(name=": Between "+str(level)+" m and "+str(levels[j+1])+" m", outerboundaryis=parentPathTupleList, innerboundaryis=childPathTupleList)
-                rgb = np.array(colormap(norm(level))[0:-1]) * 255
-                rgb = [hex(int(np.round(value))).replace("0x", "") for value in rgb]
-                rgb.append(hex(int(np.round(alpha * 255))).replace("0x", ""))
-                rgb = "".join(reversed(rgb))
-                parentPoly.style.polystyle.color = rgb
-                polyAx.plot(parentPath[:,0], parentPath[:,1], transform=ccrs.PlateCarree(), color="red", linewidth=0.5)
-                for childPath in childPaths:
-                    polyAx.plot(childPath[:,0], childPath[:,1], transform=ccrs.PlateCarree(), color="cyan", linewidth=0.5)
-        j += 1
-    polyAx.add_feature(cfeat.COASTLINE.with_scale("50m"))
-    polyAx.set_extent([-180, 180, -90, 90])
-    polyAx.set_axis_off()
-    polyFig.set_size_inches(1920*px, 1080*px)
-    polyFig.savefig("POLY_"+outputFileName+".png")
-    with open("POLY_"+outputFileName+".kml", "w") as f:
-        f.write(polyKml.kml())
+    create_kml_from_contourfs(polys, colormap, norm, levels, alpha, units, True, "POLY_"+outputFileName)
